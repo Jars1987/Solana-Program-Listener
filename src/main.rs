@@ -1,16 +1,13 @@
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc,
-};
-
+use anyhow::{Context, Ok};
+use futures::StreamExt;
 use solana_account_decoder::UiAccountEncoding;
 use solana_client::{
-    pubsub_client::PubsubClient,
+    nonblocking::pubsub_client::PubsubClient,
     rpc_config::{RpcAccountInfoConfig, RpcProgramAccountsConfig},
     rpc_response::{Response, RpcKeyedAccount},
 };
 use solana_sdk::pubkey;
-use tokio::{self, sync::Notify};
+use tokio::{self, signal};
 
 mod state;
 use state::pool::Poll;
@@ -19,14 +16,15 @@ use state::pool::Poll;
 const POLL_DISCRIMINATOR: [u8; 8] = [110, 234, 167, 188, 231, 136, 153, 111];
 const POOL_CANDIDATE_DISCRIMINATOR: [u8; 8] = [86, 69, 250, 96, 193, 10, 222, 123];
 const VOTE_DISCRIMINATOR: [u8; 8] = [241, 93, 35, 191, 254, 147, 17, 202];
+const URL: &'static str = "wss://api.devnet.solana.com/";
 
 #[tokio::main]
-async fn main() {
-    let shutdown = Arc::new(AtomicBool::new(false));
-    let notify = Arc::new(Notify::new());
-
-    let shutdown_clone = shutdown.clone();
-    let notify_clone = notify.clone();
+async fn main() -> anyhow::Result<()> {
+    //Connect to the RPC
+    let client = PubsubClient::new(URL)
+        .await
+        .map_err(anyhow::Error::from)
+        .with_context(|| "Failed to connect to PubsubClient")?;
 
     // Replace with your deployed voting program ID
     let program_id = pubkey!("HH6z4hgoYg2ZsSkceAUxPZUJdWt8hLqUm1SoEmWqYhPh");
@@ -42,54 +40,30 @@ async fn main() {
         sort_results: None,
     };
 
-    let (client, receiver) = match PubsubClient::program_subscribe(
-        "wss://api.devnet.solana.com/",
-        &program_id,
-        Some(config),
-    ) {
-        Ok((client, receiver)) => (client, receiver),
-        Err(err) => {
-            eprintln!("Subscription failed: {:?}", err);
-            return;
-        }
-    };
+    let (mut stream, _unsubscribe) = client
+        .program_subscribe(&program_id, Some(config))
+        .await
+        .unwrap();
 
     println!("Listening for state changes to program: {}", program_id);
 
-    // Spawn blocking receiver loop
-    let recv_handle = tokio::task::spawn_blocking(move || {
-        while !shutdown_clone.load(Ordering::SeqCst) {
-            match receiver.recv() {
-                Ok(response) => handle_response(response),
-                Err(_) => break, // channel closed
+    tokio::select! {
+        _ = async {
+            while let Some(response) = stream.next().await {
+                handle_response(response);
             }
+        } => {}
+
+        _ = signal::ctrl_c() => {
+            println!("Ctrl+C received, shutting down...");
         }
-        notify_clone.notify_one(); // notify main that receiver finished
-    });
-
-    // Wait for ctrl+c or receiver to finish
-    let shutdown_reason = tokio::select! {
-        _ = tokio::signal::ctrl_c() => {
-            println!("Ctrl+C pressed");
-            shutdown.store(true, Ordering::SeqCst);
-
-            if let Err(e) = client.send_unsubscribe() {
-             eprintln!("Unsubscribe failed: {:?}", e);
-         }
-            // Wait for receiver loop to finish
-            notify.notified().await;
-            "Ctrl+C"
-        },
-        _ = recv_handle => "Receiver Closed"
-    };
-
-    println!("Shutting down due to: {}", shutdown_reason);
-
-    if let Err(e) = client.send_unsubscribe() {
-        eprintln!("Unsubscribe failed: {:?}", e);
     }
 
-    println!("Unsubscribed and exiting.");
+    //Stream needs to be dropepds as its borrowing client
+    drop(stream);
+    client.shutdown().await?;
+    println!(" clean exit");
+    Ok(())
 }
 
 fn handle_response(response: Response<RpcKeyedAccount>) {
