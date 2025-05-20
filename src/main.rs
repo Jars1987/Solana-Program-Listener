@@ -20,16 +20,23 @@ const URL: &'static str = "wss://api.devnet.solana.com/";
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    //Connect to the RPC
+    // Step 1: Connect to Solana RPC WebSocket server using the async PubsubClient.
+    // This client manages a WebSocket connection to listen for events (e.g. account updates).
+    // Unlike the blocking version, this is fully async and cancelable
     let client = PubsubClient::new(URL)
         .await
         .map_err(anyhow::Error::from)
         .with_context(|| "Failed to connect to PubsubClient")?;
 
-    // Replace with your deployed voting program ID
+    // Step 2: Define the Program ID you want to listen to.
+    // This is the public key of the on-chain Solana program you're interested in (e.g. a voting dApp).
+    // Only accounts owned by this program will trigger updates via `program_subscribe`.
     let program_id = pubkey!("HH6z4hgoYg2ZsSkceAUxPZUJdWt8hLqUm1SoEmWqYhPh");
 
-    //important to set the encoding in the config other wise it might lead to unknown behaviour
+    // Step 3: Define the subscription config for program accounts.
+    // Without explicitly setting Base64 encoding, account data may come back as "legacy" format,
+    // or be inconsistently decoded (leading to decode errors).
+    // Other options (like filters, context, and sorting) are left default or None here.
     let config = RpcProgramAccountsConfig {
         filters: None,
         account_config: RpcAccountInfoConfig {
@@ -40,29 +47,46 @@ async fn main() -> anyhow::Result<()> {
         sort_results: None,
     };
 
+    // Step 4: Subscribe to program-owned accounts using `program_subscribe`.
+    // Returns:
+    // - `stream`: a `futures::Stream` of account changes (as `RpcResponse<RpcKeyedAccount>`)
+    // - `_unsubscribe`: a closure to manually unsubscribe (not used here)
+    //
+    // If subscription fails (e.g. network issue, bad program ID), the error is wrapped in context.
     let (mut stream, _unsubscribe) = client
         .program_subscribe(&program_id, Some(config))
         .await
-        .unwrap();
+        .map_err(anyhow::Error::from)
+        .with_context(|| "Failed to subscribe to the program")?;
 
     println!("Listening for state changes to program: {}", program_id);
 
+    // Step 5: Use `tokio::select!` to wait for either:
+    // 1. The `stream` finishing (due to RPC server closing connection)
+    // 2. The user pressing Ctrl+C (for graceful shutdown)
     tokio::select! {
+        // Loop over incoming updates (stream is an async stream of account changes)
+        // As long as messages are coming in, this loop runs and processes them one by one.
         _ = async {
             while let Some(response) = stream.next().await {
+                // Process each account update (e.g. decode poll state and print info)
                 handle_response(response);
             }
         } => {}
-
+        // If Ctrl+C is received, we break the listener loop and begin shutdown.
         _ = signal::ctrl_c() => {
             println!("Ctrl+C received, shutting down...");
         }
     }
 
-    //Stream needs to be dropepds as its borrowing client
+    // Step 6: Drop the stream before shutting down the client.
+    // Important: the stream borrows from `client`, so we must drop it explicitly
+    // to avoid "cannot move out of borrowed value" compiler error.
     drop(stream);
+    // Step 7: Gracefully shut down the WebSocket connection.
+    // This sends the shutdown signal to the internal WebSocket task spawned by `PubsubClient`.
     client.shutdown().await?;
-    println!(" clean exit");
+    println!("Good Bye");
     Ok(())
 }
 
