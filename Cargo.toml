@@ -12,3 +12,6 @@ solana-account-decoder = "=2.1.21"
 solana-client = "=2.1.21"
 solana-sdk = "2.1.21"
 tokio = { version = "1.45.0", features = ["full"] }
+diesel = { version = "2.1.0", features = ["postgres", "r2d2", "uuid"] }
+dotenvy = "0.15" 
+clap =  { version = "4.5.38", features = ["derive"] }

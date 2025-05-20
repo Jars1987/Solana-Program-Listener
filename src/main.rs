@@ -1,4 +1,4 @@
-use anyhow::{Context, Ok};
+use anyhow::{Context, Result};
 use futures::StreamExt;
 use solana_account_decoder::UiAccountEncoding;
 use solana_client::{
@@ -11,6 +11,9 @@ use tokio::{self, signal};
 
 mod state;
 use state::pool::Poll;
+mod db;
+use db::db::{establish_pool, upsert_poll, PgPool};
+use db::models::NewPoll;
 
 // Descriminator obtained from the IDL
 const POLL_DISCRIMINATOR: [u8; 8] = [110, 234, 167, 188, 231, 136, 153, 111];
@@ -19,7 +22,7 @@ const VOTE_DISCRIMINATOR: [u8; 8] = [241, 93, 35, 191, 254, 147, 17, 202];
 const URL: &'static str = "wss://api.devnet.solana.com/";
 
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
+async fn main() -> Result<()> {
     // Step 1: Connect to Solana RPC WebSocket server using the async PubsubClient.
     // This client manages a WebSocket connection to listen for events (e.g. account updates).
     // Unlike the blocking version, this is fully async and cancelable
@@ -27,6 +30,8 @@ async fn main() -> anyhow::Result<()> {
         .await
         .map_err(anyhow::Error::from)
         .with_context(|| "Failed to connect to PubsubClient")?;
+
+    let db_pool = establish_pool()?;
 
     // Step 2: Define the Program ID you want to listen to.
     // This is the public key of the on-chain Solana program you're interested in (e.g. a voting dApp).
@@ -70,7 +75,7 @@ async fn main() -> anyhow::Result<()> {
         _ = async {
             while let Some(response) = stream.next().await {
                 // Process each account update (e.g. decode poll state and print info)
-                handle_response(response);
+                handle_response(response, &db_pool);
             }
         } => {}
         // If Ctrl+C is received, we break the listener loop and begin shutdown.
@@ -90,17 +95,58 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn handle_response(response: Response<RpcKeyedAccount>) {
+/// Handles a single account update message received from the Solana websocket subscription.
+/// This function:
+/// 1. Decodes the raw account data.
+/// 2. Checks the account's type via its 8-byte Anchor discriminator.
+/// 3. If it's a `Poll`, it parses the full state and inserts or updates it in the SQL database.
+/// 4. Runs the Diesel DB operation in a blocking thread to avoid stalling the async stream.
+///
+/// # Arguments
+/// - `response`: A Solana `RpcResponse` containing the updated account state.
+/// - `db_pool`: A reference to the Diesel PostgreSQL connection pool.
+fn handle_response(response: Response<RpcKeyedAccount>, db_pool: &PgPool) {
+    // Extract the inner Solana account info
     let account = response.value.account;
+    // Decode the account data (Base64 → raw Vec<u8>)
     let data = account.data.decode();
 
+    // Only proceed if the decoding worked and we got enough bytes to inspect
     if let Some(acc_data) = data {
         if acc_data.len() >= 8 {
+            // Determine the type of Solana account using the first 8 bytes (Anchor discriminator)
             let account_type = match_voting_account_type(&acc_data[..8]);
             match account_type {
                 VotingAccountType::Poll => {
+                    // If it's a Poll account, try to deserialize the Poll struct
                     if let Some(poll) = decode_poll(&acc_data) {
-                        //then print
+                        // Build a `NewPoll` struct that matches your SQL schema
+                        // This maps the on-chain Poll to a format Diesel understands
+                        let new_poll = NewPoll {
+                            poll_id: poll.poll_id as i64, // Diesel uses i64 instead of u64
+                            poll_owner: poll.poll_owner.to_bytes(),
+                            poll_name: poll.poll_name.clone(),
+                            poll_description: poll.poll_description.clone(),
+                            poll_start: poll.poll_start as i64,
+                            poll_end: poll.poll_end as i64,
+                            candidate_amount: poll.candidate_amount as i64,
+                            candidate_winner: poll.candidate_winner.to_bytes(),
+                        };
+
+                        // Clone the r2d2 pool — this is cheap and encouraged.
+                        // The pool itself is internally wrapped in an Arc, so clones are safe.
+                        let db_pool_clone = db_pool.clone();
+
+                        // Offload DB write to a blocking thread
+                        // Diesel is synchronous and would block the async runtime if run here directly.
+                        // `spawn_blocking` tells Tokio: "Run this on a dedicated thread."
+                        tokio::task::spawn_blocking(move || {
+                            if let Err(e) = upsert_poll(&db_pool_clone, &new_poll) {
+                                eprintln!("DB insert failed: {:?}", e);
+                            }
+                        });
+
+                        // These logs are printed **regardless of DB success** (which is decoupled).
                         println!("New Poll account updated:");
                         println!("ID: {}", poll.poll_id);
                         println!("Owner: {}", poll.poll_owner);
@@ -114,6 +160,7 @@ fn handle_response(response: Response<RpcKeyedAccount>) {
                         println!("Could not decode as Poll");
                     }
                 }
+                // These are stubs for now — you can later implement decoding + DB storage here too
                 VotingAccountType::Candidate => {
                     println!("Candidate account update");
                 }
