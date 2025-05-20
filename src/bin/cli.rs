@@ -6,7 +6,7 @@ use voting_dapp_listener::db::models::Poll;
 /// CLI for querying indexed poll data from the PostgreSQL database.
 /// This CLI interfaces with the off-chain indexer database populated by the listener.
 #[derive(Parser)]
-#[command(name = "Voting DApp CLI")]
+#[command(name = "Voting DAPP CLI")]
 #[command(about = "Query the indexed poll data", long_about = None)]
 struct Cli {
     /// The root command, which delegates to subcommands (e.g., list, query, etc.)

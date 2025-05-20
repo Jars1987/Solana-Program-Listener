@@ -113,8 +113,7 @@ fn handle_response(response: Response<RpcKeyedAccount>, db_pool: &PgPool) {
     if let Some(acc_data) = data {
         if acc_data.len() >= 8 {
             // Determine the type of Solana account using the first 8 bytes (Anchor discriminator)
-            let account_type = match_voting_account_type(&acc_data[..8]);
-            match account_type {
+            match match_voting_account_type(&acc_data[..8]) {
                 VotingAccountType::Poll => {
                     // If it's a Poll account, try to deserialize the Poll struct
                     if let Some(poll) = decode_poll(&acc_data) {
@@ -144,7 +143,7 @@ fn handle_response(response: Response<RpcKeyedAccount>, db_pool: &PgPool) {
                             }
                         });
 
-                        // These logs are printed **regardless of DB success** (which is decoupled).
+                        // These logs are printed regardless of DB success (which is decoupled).
                         println!("New Poll account updated:");
                         println!("ID: {}", poll.poll_id);
                         println!("Owner: {}", poll.poll_owner);

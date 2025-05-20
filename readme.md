@@ -136,13 +136,13 @@ poll_id is used as the unique key for upserts
 
 You can extend the logic for Candidates or Votes
 
-🚧 Optional Extensions Add filters to CLI (e.g. --owner, --active)
+## 🚧 Optional Extensions
+
+Add filters to CLI (e.g. --owner, --active)
 
 Add REST API layer over the SQL database
 
 Index additional account types (candidates, votes)
-
-Export CSVs or generate charts from the DB
 
 ## 📜 License
 
