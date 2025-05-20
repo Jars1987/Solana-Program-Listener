@@ -1,4 +1,4 @@
-# 🗳️ Solana Voting Program Listener & Indexer (Learning Edition)
+# 🗳️ Solana Voting Program Listener & Indexer
 
 This Rust project demonstrates how to build a **real-time on-chain listener**
 for a Solana program, decode Anchor-based accounts, and index the data into a
@@ -41,7 +41,7 @@ git clone https://github.com/your-username/voting-dapp-listener.git
 cd voting-dapp-listener
 ```
 
-2. Configure Your Program Edit src/main.rs:
+### 2. Configure Your Program Edit src/main.rs:
 
 ```
 let program_id = pubkey!("HH6z4hgoYg2ZsSkceAUxPZUJdWt8hLqUm1SoEmWqYhPh");
@@ -51,7 +51,7 @@ let program_id = pubkey!("HH6z4hgoYg2ZsSkceAUxPZUJdWt8hLqUm1SoEmWqYhPh");
 Replace this with your own deployed program’s ID. You can also update the struct
 in src/state/pool.rs to match your on-chain data.
 
-3. 3. Set Up PostgreSQL Install Postgres:
+### 3. Set Up PostgreSQL Install Postgres:
 
 ```bash
 brew install postgresql@14
@@ -65,7 +65,7 @@ CREATE USER voting_user WITH PASSWORD 'test123!';
 CREATE DATABASE voting_dapp OWNER voting_user;
 ```
 
-4. Configure .env
+### 4. Configure .env
 
 Create a file called .env:
 
@@ -73,7 +73,7 @@ Create a file called .env:
 DATABASE_URL=postgres://voting_user:test123!@localhost/voting_dapp
 ```
 
-5. Set Up Diesel
+### 5. Set Up Diesel
 
 Install Diesel CLI:
 
