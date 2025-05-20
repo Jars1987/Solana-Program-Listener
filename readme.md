@@ -1,78 +1,98 @@
-# 🗳️ Solana Voting Program Listener (Learning Edition)
+# 🗳️ Solana Voting Program Listener & Indexer (Learning Edition)
 
-This Rust project demonstrates how to listen for real-time state changes in a
-Solana program using WebSockets. It decodes on-chain account data (like polls,
-candidates, and votes) using known Anchor discriminators and prints it to the
-console.
+This Rust project demonstrates how to build a **real-time on-chain listener**
+for a Solana program, decode Anchor-based accounts, and index the data into a
+PostgreSQL database using Diesel ORM. It also includes a simple **CLI tool** to
+query the indexed data.
 
-| ⚠️ Note: This project is for learning purposes only. It’s a minimal example
-meant to help you understand how to use Solana WebSockets in Rust, including
-account decoding, signal handling, and async | patterns. It is not
-production-ready.
+> ⚠️ This is a learning-focused project meant to teach you the basics of
+> indexing, decoding, WebSockets, SQL integration, and command-line tooling in
+> Rust + Solana. It is **not production-ready**, but can be extended.
+
+---
 
 ## ✨ What You’ll Learn
 
-How to subscribe to Solana program account updates using WebSockets
+✅ How to subscribe to Solana account updates using **WebSockets**  
+✅ How to **decode on-chain data** using Anchor discriminators  
+✅ How to write decoded data to **PostgreSQL** using **Diesel ORM**  
+✅ How to build a simple **CLI** to query your indexed blockchain state  
+✅ How to use `tokio`, `spawn_blocking`, and async Rust patterns
 
-How to decode on-chain account data using Anchor-style discriminators
+---
 
-How to use tokio, PubsubClient, and async Rust patterns
+## 🧠 How It Works
 
-## 🔧 Setup
+- Connects to the Solana Devnet via `program_subscribe` (WebSockets)
+- Filters and decodes specific on-chain accounts (e.g. `Poll`)
+- Persists data to a SQL database in real time
+- Lets you query stored data using a CLI (built with `clap`)
 
-Prerequisites Rust (2021 edition)
+You can easily replace the `Poll` model with your own program’s state.
 
-Solana CLI (configured to Devnet or your desired cluster)
+---
 
-Your program deployed on-chain (or use the existing Voting Program for testing)
+## 🛠️ Project Setup
 
-Anchor IDL (to extract the discriminators and struct layout)
-
-1. Clone the Repo
+### 1. Clone the Project
 
 ```bash
-git clone https://github.com/your-repo/voting-listener.git
-cd voting-listener
+git clone https://github.com/your-username/voting-dapp-listener.git
+cd voting-dapp-listener
 ```
 
-2. Update Program ID In main.rs, replace the placeholder with your deployed
-   voting program’s ID:
+2. Configure Your Program Edit src/main.rs:
 
 ```
 let program_id = pubkey!("HH6z4hgoYg2ZsSkceAUxPZUJdWt8hLqUm1SoEmWqYhPh");
 
 ```
 
-3. Add Your Struct In state/pool.rs, we defined a Poll struct and implemented
-   try_from_anchor_bytes() for decoding but you can adapt to your own:
+Replace this with your own deployed program’s ID. You can also update the struct
+in src/state/pool.rs to match your on-chain data.
+
+3. 3. Set Up PostgreSQL Install Postgres:
+
+```bash
+brew install postgresql@14
+brew services start postgresql
+```
+
+Create user and database:
+
+```sql
+CREATE USER voting_user WITH PASSWORD 'test123!';
+CREATE DATABASE voting_dapp OWNER voting_user;
+```
+
+4. Configure .env
+
+Create a file called .env:
 
 ```
-use solana_sdk::pubkey::Pubkey;
+DATABASE_URL=postgres://voting_user:test123!@localhost/voting_dapp
+```
 
-#[derive(Debug)]
-pub struct Poll {
-    pub poll_id: u64,
-    pub poll_owner: Pubkey,
-    pub poll_name: String,
-    pub poll_description: String,
-    pub poll_start: u64,
-    pub poll_end: u64,
-    pub candidate_amount: u32,
-    pub candidate_winner: Pubkey,
-}
+5. Set Up Diesel
 
-impl Poll {
-    pub fn try_from_anchor_bytes(data: &[u8]) -> Option<Self> {
-        // Implement manual parsing here based on Anchor layout
-        todo!()
-    }
-}
+Install Diesel CLI:
+
+```bash
+cargo install diesel_cli --no-default-features --features postgres
+Run the migrations:
+```
+
+```bash
+diesel setup --migration-dir db/migrations
+diesel migration run --migration-dir db/migrations
+diesel print-schema --output-file src/db/schema.rs
 ```
 
 🚀 Run the Listener
 
 ```
-cargo run
+cargo run --bin voting-dapp-listener
+
 ```
 
 Example output:
@@ -91,16 +111,38 @@ Candidates: 3
 Winner: 11111111111111111111111111111111
 ```
 
+🔍 Querying with the CLI
+
+In a new terminal window:
+
+```bash
+cargo run --bin cli -- list-polls
+
+```
+
+Example output:
+
+```bash
+🗳️ Poll #21: Final Vote | 1747695600000 → 1747785600000
+```
+
 ## 🧠 Notes
 
-Anchor accounts start with an 8-byte discriminator. These help you identify the
-account type.
+Uses spawn_blocking to safely insert data from async context
 
-The program uses UiAccountEncoding::Base64 to ensure correct decoding of binary
-data.
+WebSocket shutdown is cleanly handled with ctrl_c()
 
-Candidate and Vote accounts are detected but not yet decoded. You can extend the
-logic similarly.
+poll_id is used as the unique key for upserts
+
+You can extend the logic for Candidates or Votes
+
+🚧 Optional Extensions Add filters to CLI (e.g. --owner, --active)
+
+Add REST API layer over the SQL database
+
+Index additional account types (candidates, votes)
+
+Export CSVs or generate charts from the DB
 
 ## 📜 License
 

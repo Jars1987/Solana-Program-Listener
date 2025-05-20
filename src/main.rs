@@ -9,11 +9,9 @@ use solana_client::{
 use solana_sdk::pubkey;
 use tokio::{self, signal};
 
-mod state;
-use state::pool::Poll;
-mod db;
-use db::db::{establish_pool, upsert_poll, PgPool};
-use db::models::NewPoll;
+use voting_dapp_listener::db::db::{establish_pool, upsert_poll, PgPool};
+use voting_dapp_listener::db::models::NewPoll;
+use voting_dapp_listener::state::pool::Poll;
 
 // Descriminator obtained from the IDL
 const POLL_DISCRIMINATOR: [u8; 8] = [110, 234, 167, 188, 231, 136, 153, 111];
@@ -124,13 +122,13 @@ fn handle_response(response: Response<RpcKeyedAccount>, db_pool: &PgPool) {
                         // This maps the on-chain Poll to a format Diesel understands
                         let new_poll = NewPoll {
                             poll_id: poll.poll_id as i64, // Diesel uses i64 instead of u64
-                            poll_owner: poll.poll_owner.to_bytes(),
+                            poll_owner: poll.poll_owner.to_bytes().to_vec(),
                             poll_name: poll.poll_name.clone(),
                             poll_description: poll.poll_description.clone(),
                             poll_start: poll.poll_start as i64,
                             poll_end: poll.poll_end as i64,
                             candidate_amount: poll.candidate_amount as i64,
-                            candidate_winner: poll.candidate_winner.to_bytes(),
+                            candidate_winner: poll.candidate_winner.to_bytes().to_vec(),
                         };
 
                         // Clone the r2d2 pool — this is cheap and encouraged.
